@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import re
 from config import USER_AGENT
 import logging
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -57,131 +58,229 @@ def scrape_product_info(url):
             return None, None, f"Failed to access the product page. Status code: {response.status_code}"
         
         soup = BeautifulSoup(response.text, 'lxml')
-        # Extract product name from title
-        title_tag = soup.find('title')
-        product_name = title_tag.text.split('-')[0].strip() if title_tag else None
         
-        # Try to get a better product name from h1 with class pr-new-br (Trendyol's product title class)
-        h1_tag = soup.find('h1', class_='pr-new-br')
+        # **YENİ: Ürün adı çekme - Güncel yapı**
+        product_name = None
+        
+        # Method 1: YENİ Trendyol yapısı - h1 with data-testid
+        h1_tag = soup.find('h1', attrs={'data-testid': 'product-name'})
         if h1_tag:
-            # If there's a brand link inside the h1
-            brand_link = h1_tag.find('a', class_='product-brand-name-with-link')
-            brand_name = brand_link.text.strip() if brand_link else ""
-            
-            # Find the span containing the product description
-            product_desc_span = h1_tag.find('span')
-            product_desc = product_desc_span.text.strip() if product_desc_span else ""
-            
-            # Combine brand and product description
-            if brand_name and product_desc:
-                product_name = f"{brand_name} {product_desc}"
-            elif h1_tag.text:
-                product_name = h1_tag.text.strip()
+            product_name = h1_tag.text.strip()
         
-        # Fallback to any h1 tag if no specific product title tag found
+        # Method 2: Genel h1 arama
         elif soup.find('h1'):
             product_name = soup.find('h1').text.strip()
         
-        # Check if product is sold out - Enhanced detection
+        # Method 3: Title'dan çekme (fallback)
+        elif soup.find('title'):
+            title_text = soup.find('title').text
+            product_name = title_text.split('-')[0].strip() if title_text else None
+        
+        # **YENİ: Stok kontrolü - Güncel yapı**
         is_sold_out = False
+        stock_confirmed = False  # Pozitif stok kontrolü için flag
         
-        # Method 1: Check specific sold-out button selector
-        sold_out_button = soup.select_one('.product-button-container .add-to-basket.sold-out')
-        if sold_out_button and "Tükendi" in sold_out_button.text:
-            is_sold_out = True
-        
-        # Method 2: Check for any text containing "Stoklar Tükendi" or "Tükendi"
-        if not is_sold_out:
-            sold_out_texts = soup.find_all(string=lambda text: text and ('Stoklar Tükendi' in text or 'Tükendi' in text))
-            if sold_out_texts:
+        # Method 1: YENİ - Add to cart button kontrolü (EN ÖNEMLİSİ)
+        add_to_cart_btn = soup.find('button', attrs={'data-testid': 'add-to-cart-button'})
+        if add_to_cart_btn:
+            btn_text = add_to_cart_btn.get_text().strip()
+            # Eğer buton "Sepete Ekle" yazıyorsa stokta var demektir
+            if 'Sepete Ekle' in btn_text:
+                is_sold_out = False
+                stock_confirmed = True
+                logger.info(f"Product is in stock - add to cart button found")
+            elif 'Tükendi' in btn_text or 'Stok Yok' in btn_text or 'Mevcut Değil' in btn_text:
                 is_sold_out = True
-                logger.info(f"Sold out detected via text: {sold_out_texts[0].strip()}")
+                stock_confirmed = True
+                logger.info(f"Product is sold out - button indicates no stock")
         
-        # Method 3: Check add-to-basket button text and disabled state
-        if not is_sold_out:
-            add_to_basket_btn = soup.find('button', class_='add-to-basket')
-            if add_to_basket_btn:
-                btn_text = add_to_basket_btn.get_text().strip()
-                if 'Tükendi' in btn_text or 'Stok' in btn_text or add_to_basket_btn.get('disabled'):
+        # Method 2: Buy now button kontrolü (güçlendirici)
+        if not stock_confirmed:
+            buy_now_btn = soup.find('button', class_='buy-now-button')
+            if buy_now_btn:
+                btn_text = buy_now_btn.get_text().strip()
+                if 'Şimdi Al' in btn_text:
+                    is_sold_out = False
+                    stock_confirmed = True
+                    logger.info(f"Product is in stock - buy now button found")
+        
+        # Method 3: Disabled button kontrolü (sadece pozitif kontrol yoksa)
+        if not stock_confirmed:
+            disabled_buttons = soup.find_all('button', disabled=True)
+            for btn in disabled_buttons:
+                btn_classes = btn.get('class', [])
+                if any('add-to-cart' in str(cls) or 'sepete-ekle' in str(cls) for cls in btn_classes):
                     is_sold_out = True
-                    logger.info(f"Sold out detected via button: {btn_text}")
+                    stock_confirmed = True
+                    logger.info("Product is sold out - add to cart button is disabled")
+                    break
         
-        # Method 4: Check for sold-out related CSS classes
-        if not is_sold_out:
-            sold_out_elements = soup.select('.sold-out, .stok-yok, .out-of-stock')
-            if sold_out_elements:
-                is_sold_out = True
-                logger.info("Sold out detected via CSS class")
+        # Method 4: Genel stok yokluğu mesajları (sadece pozitif kontrol yoksa)
+        if not stock_confirmed:
+            # Sadece görünür metin elementlerinde ara, JavaScript içeriğini ignore et
+            visible_elements = soup.find_all(['div', 'span', 'p', 'h1', 'h2', 'h3', 'button'], 
+                                           class_=lambda x: x and 'stock' in ' '.join(x).lower() if x else False)
+            
+            for element in visible_elements:
+                text = element.get_text().strip().lower()
+                if any(phrase in text for phrase in ['tükendi', 'stok yok', 'mevcut değil', 'satışta değil']):
+                    # Ama JavaScript veya metadata değilse
+                    if len(text) < 100 and not any(js_indicator in text for js_indicator in ['window', 'function', 'var ', '__']):
+                        is_sold_out = True
+                        stock_confirmed = True
+                        logger.info(f"Sold out detected via visible text: {text}")
+                        break
         
         if is_sold_out:
-            is_sold_out = True
             logger.info(f"Product is sold out: {product_name}")
             return product_name, 0, "Tükendi"
         
-        # Try different price selectors
+        # **YENİ: Fiyat çekme - Güncel yapı**
         price = None
-        price_selectors = [
-            {"tag": "p", "class": "campaign-price"},
-            {"tag": "span", "class": "prc-dsc"}
-        ]
         
-        for selector in price_selectors:
-            price_tag = soup.find(selector["tag"], class_=selector["class"])
-            if price_tag:
-                price = extract_price(price_tag.text)
+        # Method 1: YENİ - data-testid ile fiyat arama
+        price_container = soup.find('div', attrs={'data-testid': 'price'})
+        if price_container:
+            logger.debug(f"Found price container: {price_container}")
+            
+            # İndirimli fiyat varsa onu al
+            discounted_price = price_container.find('span', class_='price-view-discounted')
+            if discounted_price:
+                price = extract_price(discounted_price.text)
+                logger.info(f"Found discounted price: {price}")
+            
+            # İndirimli fiyat yoksa normal fiyatı al
+            if not price:
+                original_price = price_container.find('span', class_='price-view-original')
+                if original_price:
+                    price = extract_price(original_price.text)
+                    logger.info(f"Found original price: {price}")
+            
+            # price-view sınıfı olan herhangi bir span
+            if not price:
+                price_view_spans = price_container.find_all('span', class_=lambda x: x and 'price-view' in ' '.join(x))
+                for span in price_view_spans:
+                    text = span.get_text()
+                    if 'TL' in text or '₺' in text:
+                        extracted_price = extract_price(text)
+                        if extracted_price:
+                            price = extracted_price
+                            logger.info(f"Found price in price-view span: {price}")
+                            break
+            
+            # Herhangi bir fiyat elementi varsa
+            if not price:
+                price_spans = price_container.find_all('span')
+                for span in price_spans:
+                    text = span.get_text()
+                    if 'TL' in text or '₺' in text:
+                        extracted_price = extract_price(text)
+                        if extracted_price:
+                            price = extracted_price
+                            logger.info(f"Found price in span: {price}")
+                            break
+        
+        # Method 2: price-price sınıfı ile fiyat arama (yeni yapı)
+        if not price:
+            price_price_divs = soup.find_all('div', class_=lambda x: x and 'price-price' in ' '.join(x))
+            for div in price_price_divs:
+                spans = div.find_all('span')
+                for span in spans:
+                    text = span.get_text()
+                    if 'TL' in text or '₺' in text:
+                        extracted_price = extract_price(text)
+                        if extracted_price:
+                            price = extracted_price
+                            logger.info(f"Found price via price-price class: {price}")
+                            break
                 if price:
                     break
         
-        # If no price found with selectors, try JSON-LD data
+        # Method 2: ESKİ yapı - campaign-price
         if not price:
-            # Look for JSON-LD structured data which contains price information
+            price_tag = soup.find('p', class_='campaign-price')
+            if price_tag:
+                price = extract_price(price_tag.text)
+                logger.info(f"Found price via campaign-price: {price}")
+        
+        # Method 3: ESKİ yapı - prc-dsc
+        if not price:
+            price_tag = soup.find('span', class_='prc-dsc')
+            if price_tag:
+                price = extract_price(price_tag.text)
+                logger.info(f"Found price via prc-dsc: {price}")
+        
+        # Method 4: JSON-LD structured data
+        if not price:
             script_tags = soup.find_all('script', type='application/ld+json')
             for script in script_tags:
                 try:
-                    import json
                     data = json.loads(script.string)
                     if isinstance(data, dict) and 'offers' in data:
                         offers = data['offers']
                         if isinstance(offers, dict) and 'price' in offers:
                             price = float(offers['price'])
+                            logger.info(f"Found price via JSON-LD: {price}")
                             break
-                except:
+                        elif isinstance(offers, list) and offers:
+                            if 'price' in offers[0]:
+                                price = float(offers[0]['price'])
+                                logger.info(f"Found price via JSON-LD array: {price}")
+                                break
+                except Exception:
                     continue
         
-        # If still no price, try JavaScript variables
+        # Method 5: JavaScript variables (winnerVariant)
         if not price:
-            # Look for window variables containing price data
             script_tags = soup.find_all('script')
             for script in script_tags:
-                if script.string and 'winnerVariant' in script.string:
-                    # Extract price from winnerVariant data
-                    import re
-                    price_match = re.search(r'"price":\s*{\s*[^}]*"value":\s*([0-9.]+)', script.string)
-                    if price_match:
-                        price = float(price_match.group(1))
-                        break
+                if script.string and ('winnerVariant' in script.string or 'productDetail' in script.string):
+                    # Extract price from JavaScript data
+                    price_patterns = [
+                        r'"price":\s*{\s*[^}]*"value":\s*([0-9.]+)',
+                        r'"price":\s*([0-9.]+)',
+                        r'"currentPrice":\s*([0-9.]+)',
+                        r'"sellingPrice":\s*([0-9.]+)'
+                    ]
                     
-        if not price:
-            # Try to find any element containing TL as fallback (but be more careful)
-            price_elements = soup.find_all(text=re.compile(r'\d+[,.]?\d*\s*TL|\d+[,.]?\d*\s*₺'))
-            for element in price_elements:
-                # Only extract if it looks like a price (not too large to be an ID)
-                extracted_price = extract_price(element)
-                if extracted_price and extracted_price < 100000:  # Reasonable price limit
-                    price = extracted_price
-                    break
+                    for pattern in price_patterns:
+                        price_match = re.search(pattern, script.string)
+                        if price_match:
+                            price = float(price_match.group(1))
+                            logger.info(f"Found price via JavaScript: {price}")
+                            break
+                    
+                    if price:
+                        break
         
+        # Method 6: Genel TL/₺ arama (son çare)
+        if not price:
+            price_elements = soup.find_all(string=re.compile(r'\d+[,.]?\d*\s*TL|\d+[,.]?\d*\s*₺'))
+            for element in price_elements:
+                # JavaScript içeriğini skip et
+                parent = element.parent
+                if parent and parent.name == 'script':
+                    continue
+                    
+                extracted_price = extract_price(element)
+                if extracted_price and 1 <= extracted_price <= 100000:  # Reasonable price range
+                    price = extracted_price
+                    logger.info(f"Found price via general TL search: {price}")
+                    break
+        # Sonuç kontrolü
         if not product_name:
             return None, None, "Could not extract product name"
             
         if not price:
+            logger.warning(f"Could not extract price for product: {product_name}")
             return product_name, None, "Could not extract price"
             
+        logger.info(f"Successfully scraped - Product: {product_name}, Price: {price} TL")
         return product_name, price, None
         
     except requests.RequestException as e:
+        logger.error(f"Request error for {url}: {e}")
         return None, None, f"Request error: {str(e)}"
     except Exception as e:
         logger.error(f"Error scraping {url}: {e}")
         return None, None, f"Error scraping product: {str(e)}"
-

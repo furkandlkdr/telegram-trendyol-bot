@@ -386,13 +386,28 @@ def check_prices():
     
     # Send admin notification if there are too many errors
     if error_count > 5 and ADMIN_CHAT_ID:
+        total_products = sum(len(products) for products in data.values())
+        error_rate = (error_count / total_products) * 100 if total_products > 0 else 0
+        
         admin_message = f"""
 ⚠️ <b>Fiyat Kontrol Uyarısı</b>
 
 <b>Zaman:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
+<b>Toplam Ürün:</b> {total_products}
 <b>Hata Sayısı:</b> {error_count}
+<b>Hata Oranı:</b> %{error_rate:.1f}
 
-Çok sayıda hata tespit edildi. Bağlantı veya site yapısı sorunları olabilir.
+<b>Durum:</b> Çok sayıda hata tespit edildi
+<b>Olası Sebepler:</b>
+• Ağ bağlantı sorunları
+• Trendyol anti-bot korumaları
+• Site yapısı değişiklikleri
+• Sunucu yük problemi
+
+<b>Öneriler:</b>
+• İnternet bağlantısını kontrol edin
+• Birkaç dakika bekleyip tekrar deneyin
+• Bot'u yeniden başlatmayı deneyin
         """
         send_admin_notification(admin_message)
 
@@ -424,16 +439,31 @@ def send_admin_notification(message):
 def error(update: Update, context: CallbackContext):
     """Log errors caused by updates and notify admin."""
     error_message = str(context.error)
+    error_type = type(context.error).__name__
     
-    # Log the error
-    logger.error(f"Update {update} caused error {error_message}")
+    # Log the error with more detail
+    logger.error(f"Update {update} caused error {error_type}: {error_message}")
+    logger.error(f"Full traceback: {traceback.format_exc()}")
     
     # Prepare detailed error message for admin
     if ADMIN_CHAT_ID:
         try:
+            # Check for specific error types
+            error_category = "Genel Hata"
+            if "urllib3" in error_message or "HTTPError" in error_message:
+                error_category = "Ağ Bağlantı Hatası"
+            elif "timeout" in error_message.lower():
+                error_category = "Zaman Aşımı Hatası"
+            elif "connection" in error_message.lower():
+                error_category = "Bağlantı Hatası"
+            elif "remote" in error_message.lower() and "disconnect" in error_message.lower():
+                error_category = "Sunucu Bağlantı Hatası"
+            
             admin_message = f"""
 🚨 <b>Trendyol Bot Hatası</b>
 
+<b>Kategori:</b> {error_category}
+<b>Hata Türü:</b> <code>{error_type}</code>
 <b>Hata:</b> <code>{error_message}</code>
 
 <b>Zaman:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
@@ -442,6 +472,9 @@ def error(update: Update, context: CallbackContext):
 
 <b>Traceback:</b>
 <pre>{traceback.format_exc()[:1000]}</pre>
+
+<b>Önerilen Çözüm:</b>
+{get_error_solution(error_category)}
             """
             
             send_admin_notification(admin_message)
@@ -454,6 +487,17 @@ def error(update: Update, context: CallbackContext):
             update.effective_message.reply_text('Bir hata oluştu. Lütfen daha sonra tekrar deneyin.')
         except:
             pass  # Ignore if we can't send user notification
+
+def get_error_solution(error_category):
+    """Get suggested solution based on error category."""
+    solutions = {
+        "Ağ Bağlantı Hatası": "• İnternet bağlantısını kontrol edin\n• Birkaç dakika bekleyip tekrar deneyin\n• Trendyol sitesinin erişilebilir olduğunu kontrol edin",
+        "Zaman Aşımı Hatası": "• Timeout değerini artırın\n• İnternet hızını kontrol edin\n• Sunucu yükü yüksek olabilir",
+        "Bağlantı Hatası": "• DNS ayarlarını kontrol edin\n• VPN kullanıyorsanız kapatıp deneyin\n• Firewall ayarlarını kontrol edin",
+        "Sunucu Bağlantı Hatası": "• Trendyol sunucularında sorun olabilir\n• Biraz bekleyip tekrar deneyin\n• İstek sıklığını azaltın",
+        "Genel Hata": "• Logları kontrol edin\n• Bot'u yeniden başlatmayı deneyin\n• Gerekirse manual müdahale edin"
+    }
+    return solutions.get(error_category, "• Logları kontrol edin\n• Gerekirse yeniden başlatın")
 
 def main():
     """Start the bot."""

@@ -51,6 +51,7 @@ async def on_ready():
     """Event triggered when the bot is ready."""
     logger.info(f'Logged in as {bot.user.name}')
     logger.info("Bot is ready and running!")
+    await bot.tree.sync()
     # Start the scheduler
     schedule.every(CHECK_INTERVAL).minutes.do(lambda: asyncio.run_coroutine_threadsafe(check_prices(), bot.loop))
     # Run scheduler in a separate thread
@@ -63,7 +64,7 @@ async def run_scheduler():
         schedule.run_pending()
         await asyncio.sleep(1)
 
-@bot.command(name='start', aliases=['yardim'])
+@bot.hybrid_command(name='start', aliases=['yardim'])
 async def start(ctx):
     """Send a welcome message."""
     embed = discord.Embed(
@@ -71,21 +72,17 @@ async def start(ctx):
         description='Komutlar:\n'
                     '`/ekle [Trendyol linki]` - Fiyat takibi için yeni bir ürün ekler\n'
                     '`/sil [Trendyol linki]` - Takipten bir ürün çıkarır\n'
-                    '`/listele` - Takip edilen tüm ürünleri listeler\n'
+                    '`/takiptekiler` - Takip edilen ürünleri listeler\n'
+                    '`/bilgi [Trendyol linki]` - Ürün hakkında bilgi verir (takibe almaz)\n'
                     '`/yenile` - Tüm ürünlerin fiyatlarını manuel olarak kontrol eder\n\n'
                     'Ayrıca, direkt olarak Trendyol.com veya ty.gl linki göndererek de ürün ekleyebilirsiniz.',
         color=0x00ff00
     )
     await ctx.send(embed=embed)
 
-@bot.command(name='ekle')
-async def add_product_handler(ctx, *, url: str = None):
+@bot.hybrid_command(name='ekle')
+async def add_product_handler(ctx, *, url: str):
     """Add a product to track."""
-    if url is None:
-        await ctx.send('Lütfen geçerli bir Trendyol linki ekleyin.\n'
-                       'Örnek: /ekle https://www.trendyol.com/...')
-        return
-
     url = extract_url(url)
     if not url or not is_valid_trendyol_url(url):
         await ctx.send('Geçerli bir Trendyol linki bulunamadı.')
@@ -117,14 +114,9 @@ async def add_product_handler(ctx, *, url: str = None):
     else:
         await message.edit(content='Ürün eklenirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.')
 
-@bot.command(name='sil')
-async def remove_product_handler(ctx, *, url: str = None):
+@bot.hybrid_command(name='sil')
+async def remove_product_handler(ctx, *, url: str):
     """Remove a product from tracking."""
-    if url is None:
-        await ctx.send('Lütfen silmek istediğiniz ürünün Trendyol linkini ekleyin.\n'
-                       'Örnek: /sil https://www.trendyol.com/...')
-        return
-
     url = extract_url(url)
     if not url:
         await ctx.send('Geçerli bir Trendyol linki bulunamadı.')
@@ -137,44 +129,116 @@ async def remove_product_handler(ctx, *, url: str = None):
     else:
         await ctx.send('Ürün bulunamadı veya zaten takip edilmiyor.')
 
-@bot.command(name='listele')
-async def list_products(ctx):
-    """List all tracked products."""
-    products = get_all_products(ctx.channel.id)
-    
-    if not products:
-        await ctx.send('Henüz takip edilen ürün bulunmamaktadır.')
+@bot.hybrid_command(name='takiptekiler', description="Takip edilen ürünleri listeler. Admin tüm ürünleri görür.")
+async def takiptekiler(ctx):
+    """List all tracked products. Admins can see all products from all channels."""
+    # Check if the invoker is the admin
+    is_admin = str(ctx.author.id) == ADMIN_USER_ID
+
+    if is_admin:
+        # Admin view: show all products from all channels
+        all_data = get_all_products()
+        if not all_data:
+            await ctx.send('Hiçbir kanalda takip edilen ürün bulunmamaktadır.', ephemeral=True)
+            return
+
+        embed = discord.Embed(title='Tüm Kanallarda Takip Edilen Ürünler (Admin)', color=0x0000ff)
+        total_products = 0
+        
+        for channel_id, products in all_data.items():
+            try:
+                channel = await bot.fetch_channel(int(channel_id))
+                channel_name = f"#{channel.name} ({channel.guild.name})"
+            except (discord.NotFound, discord.Forbidden):
+                channel_name = f"Bilinmeyen Kanal ({channel_id})"
+
+            product_list_str = ""
+            for i, (url, product_info) in enumerate(products.items()):
+                total_products += 1
+                product_name = product_info.get('product_name', 'İsimsiz Ürün')
+                current_price = product_info.get('current_price', 0)
+
+                if current_price == 0:
+                    product_list_str += f"• **{product_name}** - Tükendi ([Link]({url}))\n"
+                else:
+                    product_list_str += f"• **{product_name}** - {current_price:.2f} TL ([Link]({url}))\n"
+
+            if product_list_str:
+                embed.add_field(name=channel_name, value=product_list_str, inline=False)
+
+        if not embed.fields:
+             await ctx.send('Hiçbir kanalda takip edilen ürün bulunmamaktadır.', ephemeral=True)
+             return
+
+        embed.set_footer(text=f"Toplam {len(all_data)} kanal ve {total_products} ürün izleniyor.")
+        await ctx.send(embed=embed, ephemeral=True)
+
+    else:
+        # Regular user view: show products for the current channel
+        products = get_all_products(ctx.channel.id)
+
+        if not products:
+            await ctx.send('Bu kanalda takip edilen ürün bulunmamaktadır.')
+            return
+
+        embed = discord.Embed(title='Takip Edilen Ürünler', color=0x00ff00)
+
+        for url, product_info in products.items():
+            product_name = product_info.get('product_name', 'İsimsiz Ürün')
+            current_price = product_info.get('current_price', 0)
+
+            if current_price == 0:
+                embed.add_field(name=product_name, value=f'**Tükendi**\n[Link]({url})', inline=False)
+                continue
+
+            initial_price = product_info.get('initial_price', 0)
+            price_diff = current_price - initial_price
+
+            if price_diff > 0:
+                price_trend = f'📈 +{price_diff:.2f} TL'
+            elif price_diff < 0:
+                price_trend = f'📉 {price_diff:.2f} TL'
+            else:
+                price_trend = '➡️ Değişim yok'
+
+            embed.add_field(
+                name=product_name,
+                value=f'**Güncel Fiyat:** {current_price:.2f} TL {price_trend}\n[Link]({url})',
+                inline=False
+            )
+
+        await ctx.send(embed=embed)
+
+@bot.hybrid_command(name='bilgi', description="Verilen linkteki ürün hakkında bilgi verir.")
+async def bilgi(ctx, *, url: str):
+    """Provides information about a product from a given URL without tracking it."""
+    url = extract_url(url)
+    if not url or not is_valid_trendyol_url(url):
+        await ctx.send('Lütfen geçerli bir Trendyol linki girin.')
         return
 
-    embed = discord.Embed(title='Takip Edilen Ürünler', color=0x00ff00)
-    
-    for url, product_info in products.items():
-        product_name = product_info.get('product_name', 'İsimsiz Ürün')
-        current_price = product_info.get('current_price', 0)
-        
-        if current_price == 0:
-            embed.add_field(name=product_name, value=f'**Tükendi**\n[Link]({url})', inline=False)
-            continue
-        
-        initial_price = product_info.get('initial_price', 0)
-        price_diff = current_price - initial_price
+    message = await ctx.send('Ürün bilgileri alınıyor...')
 
-        if price_diff > 0:
-            price_trend = f'📈 +{price_diff:.2f} TL'
-        elif price_diff < 0:
-            price_trend = f'📉 {price_diff:.2f} TL'
-        else:
-            price_trend = '➡️ Değişim yok'
+    product_name, price, error = scrape_product_info(url)
 
-        embed.add_field(
-            name=product_name,
-            value=f'**Güncel Fiyat:** {current_price:.2f} TL {price_trend}\n[Link]({url})',
-            inline=False
-        )
+    if error:
+        await message.edit(content=f'Hata: {error}')
+        return
 
-    await ctx.send(embed=embed)
+    if not price:
+        await message.edit(content='Ürün fiyatı alınamadı. Lütfen linki kontrol edin.')
+        return
 
-@bot.command(name='yenile')
+    embed = discord.Embed(
+        title='Ürün Bilgisi',
+        description=f"**Ürün:** {product_name}\n**Güncel Fiyat:** {price:.2f} TL",
+        color=0x00bfff  # Deep Sky Blue
+    )
+    embed.add_field(name="Link", value=url)
+
+    await message.edit(content=None, embed=embed)
+
+@bot.hybrid_command(name='yenile')
 async def refresh_prices_handler(ctx):
     """Manual refresh command to check all tracked products immediately."""
     products = get_all_products(ctx.channel.id)

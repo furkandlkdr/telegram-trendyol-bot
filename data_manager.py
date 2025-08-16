@@ -35,7 +35,7 @@ def save_data(data):
         logger.error(f"Error saving data to {DATA_FILE}: {e}")
         return False
 
-def add_product(channel_id, product_url, product_name, price):
+def add_product(channel_id, product_url, product_name, price, image_url):
     """Add a product to tracked products."""
     data = load_data()
     
@@ -47,7 +47,8 @@ def add_product(channel_id, product_url, product_name, price):
     data[str(channel_id)][product_url] = {
         "initial_price": price,
         "current_price": price,
-        "product_name": product_name
+        "product_name": product_name,
+        "image_url": image_url
     }
     
     return save_data(data)

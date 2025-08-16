@@ -105,7 +105,7 @@ def scrape_product_info(url):
             
             # Check if the URL is a valid Trendyol URL
             if not is_valid_trendyol_url(full_url):
-                return None, None, "URL does not belong to Trendyol"
+                return None, None, None, "URL does not belong to Trendyol"
             
             # Add delay before making request
             if attempt > 0:
@@ -133,7 +133,7 @@ def scrape_product_info(url):
                 last_error = f"HTTP {response.status_code}"
                 logger.warning(f"HTTP {response.status_code} for {url}, attempt {attempt + 1}")
                 if attempt == MAX_RETRIES - 1:
-                    return None, None, f"Failed to access product page. Status code: {response.status_code}"
+                    return None, None, None, f"Failed to access product page. Status code: {response.status_code}"
                 continue
             
             soup = BeautifulSoup(response.text, 'lxml')
@@ -155,6 +155,24 @@ def scrape_product_info(url):
                 title_text = soup.find('title').text
                 product_name = title_text.split('-')[0].strip() if title_text else None
             
+            # **Image extraction**
+            image_url = None
+
+            # Method 1: Open Graph meta tag (preferred)
+            og_image_tag = soup.find('meta', property='og:image')
+            if og_image_tag and og_image_tag.get('content'):
+                image_url = og_image_tag['content']
+                logger.info(f"Found image via og:image tag: {image_url}")
+
+            # Method 2: Find image in gallery container (fallback)
+            if not image_url:
+                gallery = soup.find('div', class_='product-detail-galleria')
+                if gallery:
+                    first_image = gallery.find('img')
+                    if first_image and first_image.get('src'):
+                        image_url = first_image['src']
+                        logger.info(f"Found image via gallery container: {image_url}")
+
             # **Stock check - Updated structure**
             is_sold_out = False
             stock_confirmed = False  # Flag for positive stock confirmation
@@ -212,7 +230,7 @@ def scrape_product_info(url):
             
             if is_sold_out:
                 logger.info(f"Product is sold out: {product_name}")
-                return product_name, 0, "Tükendi"
+                return product_name, 0, image_url, "Tükendi"
             
             # **Price extraction - Updated structure**
             price = None
@@ -349,14 +367,14 @@ def scrape_product_info(url):
             
             # Result validation
             if not product_name:
-                return None, None, "Could not extract product name"
+                return None, None, None, "Could not extract product name"
                 
             if not price:
                 logger.warning(f"Could not extract price for product: {product_name}")
-                return product_name, None, "Could not extract price"
+                return product_name, None, image_url, "Could not extract price"
                 
             logger.info(f"Successfully scraped - Product: {product_name}, Price: {price} TL")
-            return product_name, price, None
+            return product_name, price, image_url, None
         
         except requests.exceptions.Timeout as e:
             last_error = f"Timeout: {str(e)}"
@@ -376,4 +394,4 @@ def scrape_product_info(url):
     
     # All attempts failed
     logger.error(f"All {MAX_RETRIES} attempts failed for {url}. Last error: {last_error}")
-    return None, None, f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}"
+    return None, None, None, f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}"

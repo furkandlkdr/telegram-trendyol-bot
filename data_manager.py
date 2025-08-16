@@ -35,16 +35,16 @@ def save_data(data):
         logger.error(f"Error saving data to {DATA_FILE}: {e}")
         return False
 
-def add_product(chat_id, product_url, product_name, price):
+def add_product(channel_id, product_url, product_name, price):
     """Add a product to tracked products."""
     data = load_data()
     
-    # Create chat_id entry if it doesn't exist
-    if str(chat_id) not in data:
-        data[str(chat_id)] = {}
+    # Create channel_id entry if it doesn't exist
+    if str(channel_id) not in data:
+        data[str(channel_id)] = {}
     
     # Add or update the product
-    data[str(chat_id)][product_url] = {
+    data[str(channel_id)][product_url] = {
         "initial_price": price,
         "current_price": price,
         "product_name": product_name
@@ -52,45 +52,45 @@ def add_product(chat_id, product_url, product_name, price):
     
     return save_data(data)
 
-def remove_product(chat_id, product_url):
+def remove_product(channel_id, product_url):
     """Remove a product from tracked products."""
     data = load_data()
     
-    # Check if chat_id exists
-    if str(chat_id) not in data:
+    # Check if channel_id exists
+    if str(channel_id) not in data:
         return False
     
-    # Check if product_url exists in chat_id
-    if product_url not in data[str(chat_id)]:
+    # Check if product_url exists in channel_id
+    if product_url not in data[str(channel_id)]:
         return False
     
     # Remove the product
-    del data[str(chat_id)][product_url]
+    del data[str(channel_id)][product_url]
     
-    # Remove the chat_id if there are no products left
-    if not data[str(chat_id)]:
-        del data[str(chat_id)]
+    # Remove the channel_id if there are no products left
+    if not data[str(channel_id)]:
+        del data[str(channel_id)]
     
     return save_data(data)
 
-def get_all_products(chat_id=None):
-    """Get all tracked products, optionally filtered by chat_id."""
+def get_all_products(channel_id=None):
+    """Get all tracked products, optionally filtered by channel_id."""
     data = load_data()
     
-    if chat_id is not None:
-        return data.get(str(chat_id), {})
+    if channel_id is not None:
+        return data.get(str(channel_id), {})
     
     return data
 
-def update_product_price(chat_id, product_url, new_price):
+def update_product_price(channel_id, product_url, new_price):
     """Update current price of a product."""
     data = load_data()
     
-    # Check if chat_id and product_url exist
-    if str(chat_id) not in data or product_url not in data[str(chat_id)]:
+    # Check if channel_id and product_url exist
+    if str(channel_id) not in data or product_url not in data[str(channel_id)]:
         return False
     
     # Update the current price
-    data[str(chat_id)][product_url]["current_price"] = new_price
+    data[str(channel_id)][product_url]["current_price"] = new_price
     
     return save_data(data)

@@ -63,7 +63,7 @@ async def run_scheduler():
         schedule.run_pending()
         await asyncio.sleep(1)
 
-@bot.command(name='start')
+@bot.command(name='start', aliases=['yardim'])
 async def start(ctx):
     """Send a welcome message."""
     embed = discord.Embed(

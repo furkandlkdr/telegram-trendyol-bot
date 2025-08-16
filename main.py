@@ -90,7 +90,7 @@ async def add_product_handler(ctx, *, url: str):
 
     message = await ctx.send('Ürün bilgileri alınıyor...')
     
-    product_name, price, image_url, error = scrape_product_info(url)
+    product_name, price, image_url, error = await scrape_product_info(url)
     
     if error:
         await message.edit(content=f'Hata: {error}')
@@ -203,7 +203,7 @@ async def bilgi(ctx, *, url: str):
 
     message = await ctx.send('Ürün bilgileri alınıyor...')
 
-    product_name, price, image_url, error = scrape_product_info(url)
+    product_name, price, image_url, error = await scrape_product_info(url)
 
     if error:
         await message.edit(content=f'Hata: {error}')
@@ -244,7 +244,7 @@ async def refresh_prices_handler(ctx):
             product_name = product_info['product_name']
             current_price = product_info['current_price']
 
-            _, new_price, _, error = scrape_product_info(url)
+            _, new_price, _, error = await scrape_product_info(url)
 
             if error:
                 error_count += 1
@@ -314,7 +314,7 @@ async def check_prices():
                 
                 logger.info(f"Checking price for {product_name} at {url}")
                 
-                _, new_price, _, error = scrape_product_info(url)
+                _, new_price, _, error = await scrape_product_info(url)
                 
                 if error:
                     logger.error(f"Error checking {url}: {error}")
@@ -387,7 +387,7 @@ async def on_message(message):
 
         msg = await message.channel.send('Ürün bilgileri alınıyor...')
 
-        product_name, price, image_url, error = scrape_product_info(url)
+        product_name, price, image_url, error = await scrape_product_info(url)
 
         if error:
             await msg.edit(content=f'Hata: {error}')

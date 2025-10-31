@@ -605,7 +605,7 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
                 checked_count += 1
                 if current_price != 0:  # Only update if not already marked as sold out
                     changed_count += 1
-                    update_product_price(chat_id, url, new_price)  # new_price is 0 for sold out
+                    update_product_price(chat_id, url, 0)  # Mark as sold out with price 0
                     
                     # Send sold-out notification
                     notification_text = (

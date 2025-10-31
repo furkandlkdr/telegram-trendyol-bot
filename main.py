@@ -9,7 +9,7 @@ from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from scraper import scrape_product_info, is_valid_trendyol_url
 from data_manager import add_product, remove_product, get_all_products, update_product_price
-from config import TELEGRAM_BOT_TOKEN, CHECK_INTERVAL, ALLOWED_GROUP_IDS, ADMIN_CHAT_ID
+from config import TELEGRAM_BOT_TOKEN, CHECK_INTERVAL, ALLOWED_GROUP_IDS, ADMIN_CHAT_ID, PRICE_CHANGE_THRESHOLD
 
 # Configure logging
 logging.basicConfig(
@@ -344,39 +344,48 @@ def check_prices():
                 
                 # If the price has changed
                 if abs(new_price - current_price) > 0.01:  # Allow for small decimal differences
-                    # Update the price in the database
-                    update_product_price(chat_id, url, new_price)
+                    # Calculate percentage change
+                    percentage_change = abs((new_price - current_price) / current_price * 100)
                     
-                    # Prepare and send notification
-                    price_diff = new_price - current_price
-                    if price_diff > 0:
-                        trend_emoji = "📈 Fiyat Yükseldi"
-                        trend_color = "🔴"
-                    else:
-                        trend_emoji = "📉 Fiyat Düştü"
-                        trend_color = "🟢"
-                    
-                    notification_text = (
-                        f'{trend_color} <b>{trend_emoji}!</b>\n\n'
-                        f'<b>{product_name}</b>\n'
-                        f'Eski Fiyat: <b>{current_price:.2f} TL</b>\n'
-                        f'Yeni Fiyat: <b>{new_price:.2f} TL</b>\n'
-                        f'Fark: <b>{price_diff:+.2f} TL (%{(price_diff/current_price*100):+.1f})</b>\n\n'
-                        f'<a href="{url}">Ürüne Git</a>'
-                    )
-                    
-                    # Send notification
-                    try:
-                        _bot_instance.send_message(
-                            chat_id=int(chat_id),
-                            text=notification_text,
-                            parse_mode=ParseMode.HTML,
-                            disable_web_page_preview=True
+                    # Only send notification if the change is more than the threshold
+                    if percentage_change > PRICE_CHANGE_THRESHOLD:
+                        # Update the price in the database
+                        update_product_price(chat_id, url, new_price)
+                        
+                        # Prepare and send notification
+                        price_diff = new_price - current_price
+                        if price_diff > 0:
+                            trend_emoji = "📈 Fiyat Yükseldi"
+                            trend_color = "🔴"
+                        else:
+                            trend_emoji = "📉 Fiyat Düştü"
+                            trend_color = "🟢"
+                        
+                        notification_text = (
+                            f'{trend_color} <b>{trend_emoji}!</b>\n\n'
+                            f'<b>{product_name}</b>\n'
+                            f'Eski Fiyat: <b>{current_price:.2f} TL</b>\n'
+                            f'Yeni Fiyat: <b>{new_price:.2f} TL</b>\n'
+                            f'Fark: <b>{price_diff:+.2f} TL (%{(price_diff/current_price*100):+.1f})</b>\n\n'
+                            f'<a href="{url}">Ürüne Git</a>'
                         )
-                        logger.info(f"Price change notification sent to {chat_id}")
-                    except Exception as send_error:
-                        logger.error(f"Failed to send notification to {chat_id}: {send_error}")
-                        error_count += 1
+                        
+                        # Send notification
+                        try:
+                            _bot_instance.send_message(
+                                chat_id=int(chat_id),
+                                text=notification_text,
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=True
+                            )
+                            logger.info(f"Price change notification sent to {chat_id}")
+                        except Exception as send_error:
+                            logger.error(f"Failed to send notification to {chat_id}: {send_error}")
+                            error_count += 1
+                    else:
+                        # Price changed but not enough to notify - still update the database
+                        update_product_price(chat_id, url, new_price)
+                        logger.info(f"Price change for {product_name} ({percentage_change:.2f}%) is below threshold ({PRICE_CHANGE_THRESHOLD}%), no notification sent")
                 else:
                     logger.info(f"No price change for {product_name}")
             
@@ -657,41 +666,50 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
             
             # If the price has changed
             if abs(new_price - current_price) > 0.01:  # Allow for small decimal differences
-                changed_count += 1
+                # Calculate percentage change
+                percentage_change = abs((new_price - current_price) / current_price * 100)
                 
-                # Update the price in the database
-                update_product_price(chat_id, url, new_price)
-                
-                # Prepare and send notification
-                price_diff = new_price - current_price
-                if price_diff > 0:
-                    trend_emoji = "📈 Fiyat Yükseldi"
-                    trend_color = "🔴"
-                else:
-                    trend_emoji = "📉 Fiyat Düştü"
-                    trend_color = "🟢"
-                
-                notification_text = (
-                    f'{trend_color} <b>{trend_emoji}! (Manuel Kontrol)</b>\n\n'
-                    f'<b>{product_name}</b>\n'
-                    f'Eski Fiyat: <b>{current_price:.2f} TL</b>\n'
-                    f'Yeni Fiyat: <b>{new_price:.2f} TL</b>\n'
-                    f'Fark: <b>{price_diff:+.2f} TL (%{(price_diff/current_price*100):+.1f})</b>\n\n'
-                    f'<a href="{url}">Ürüne Git</a>'
-                )
-                
-                # Send notification immediately
-                try:
-                    context.bot.send_message(
-                        chat_id=chat_id,
-                        text=notification_text,
-                        parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True
+                # Only send notification if the change is more than the threshold
+                if percentage_change > PRICE_CHANGE_THRESHOLD:
+                    changed_count += 1
+                    
+                    # Update the price in the database
+                    update_product_price(chat_id, url, new_price)
+                    
+                    # Prepare and send notification
+                    price_diff = new_price - current_price
+                    if price_diff > 0:
+                        trend_emoji = "📈 Fiyat Yükseldi"
+                        trend_color = "🔴"
+                    else:
+                        trend_emoji = "📉 Fiyat Düştü"
+                        trend_color = "🟢"
+                    
+                    notification_text = (
+                        f'{trend_color} <b>{trend_emoji}! (Manuel Kontrol)</b>\n\n'
+                        f'<b>{product_name}</b>\n'
+                        f'Eski Fiyat: <b>{current_price:.2f} TL</b>\n'
+                        f'Yeni Fiyat: <b>{new_price:.2f} TL</b>\n'
+                        f'Fark: <b>{price_diff:+.2f} TL (%{(price_diff/current_price*100):+.1f})</b>\n\n'
+                        f'<a href="{url}">Ürüne Git</a>'
                     )
-                    logger.info(f"Manual price change notification sent to {chat_id}")
-                except Exception as send_error:
-                    logger.error(f"Failed to send notification to {chat_id}: {send_error}")
-                    error_count += 1
+                    
+                    # Send notification immediately
+                    try:
+                        context.bot.send_message(
+                            chat_id=chat_id,
+                            text=notification_text,
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=True
+                        )
+                        logger.info(f"Manual price change notification sent to {chat_id}")
+                    except Exception as send_error:
+                        logger.error(f"Failed to send notification to {chat_id}: {send_error}")
+                        error_count += 1
+                else:
+                    # Price changed but not enough to notify - still update the database
+                    update_product_price(chat_id, url, new_price)
+                    logger.info(f"Price change for {product_name} ({percentage_change:.2f}%) is below threshold ({PRICE_CHANGE_THRESHOLD}%), no notification sent")
         
         except Exception as e:
             logger.error(f"Error checking price for {url}: {e}")

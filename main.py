@@ -344,6 +344,11 @@ def check_prices():
                 
                 # If the price has changed
                 if abs(new_price - current_price) > 0.01:  # Allow for small decimal differences
+                    # Safety check to prevent division by zero
+                    if current_price == 0:
+                        logger.warning(f"Unexpected zero price for {product_name}, skipping percentage calculation")
+                        continue
+                    
                     # Calculate percentage change
                     percentage_change = abs((new_price - current_price) / current_price * 100)
                     
@@ -666,6 +671,11 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
             
             # If the price has changed
             if abs(new_price - current_price) > 0.01:  # Allow for small decimal differences
+                # Safety check to prevent division by zero
+                if current_price == 0:
+                    logger.warning(f"Unexpected zero price for {product_name}, skipping percentage calculation")
+                    continue
+                
                 # Calculate percentage change
                 percentage_change = abs((new_price - current_price) / current_price * 100)
                 

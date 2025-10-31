@@ -37,3 +37,6 @@ DATA_FILE = 'tracked_products.json'
 # User agent for requests
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 
+# Price change notification threshold (in percentage)
+PRICE_CHANGE_THRESHOLD = 5.0  # Only notify if price changes by more than 5%
+

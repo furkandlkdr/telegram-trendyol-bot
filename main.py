@@ -412,8 +412,11 @@ def check_prices():
                     # Calculate percentage change
                     percentage_change = abs((new_price - current_price) / current_price * 100)
                     
+                    # Get the threshold for this chat
+                    threshold = get_threshold(chat_id)
+                    
                     # Only send notification if the change is more than the threshold
-                    if percentage_change > PRICE_CHANGE_THRESHOLD:
+                    if percentage_change > threshold:
                         # Update the price in the database
                         update_product_price(chat_id, url, new_price)
                         
@@ -450,7 +453,7 @@ def check_prices():
                     else:
                         # Price changed but not enough to notify - still update the database
                         update_product_price(chat_id, url, new_price)
-                        logger.info(f"Price change for {product_name} ({percentage_change:.2f}%) is below threshold ({PRICE_CHANGE_THRESHOLD}%), no notification sent")
+                        logger.info(f"Price change for {product_name} ({percentage_change:.2f}%) is below threshold ({threshold}%), no notification sent")
                 else:
                     logger.info(f"No price change for {product_name}")
             

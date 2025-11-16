@@ -94,3 +94,27 @@ def update_product_price(chat_id, product_url, new_price):
     data[str(chat_id)][product_url]["current_price"] = new_price
     
     return save_data(data)
+
+def get_threshold(chat_id):
+    """Get the price change threshold for a specific chat. Returns default if not set."""
+    from config import PRICE_CHANGE_THRESHOLD
+    data = load_data()
+    
+    if str(chat_id) not in data:
+        return PRICE_CHANGE_THRESHOLD
+    
+    # Get threshold from chat settings, or use default if not set
+    return data[str(chat_id)].get('_threshold', PRICE_CHANGE_THRESHOLD)
+
+def set_threshold(chat_id, threshold):
+    """Set the price change threshold for a specific chat."""
+    data = load_data()
+    
+    # Create chat_id entry if it doesn't exist
+    if str(chat_id) not in data:
+        data[str(chat_id)] = {}
+    
+    # Store threshold in a special key (prefixed with _ to distinguish from product URLs)
+    data[str(chat_id)]['_threshold'] = float(threshold)
+    
+    return save_data(data)

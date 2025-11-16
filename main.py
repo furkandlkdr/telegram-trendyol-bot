@@ -8,7 +8,7 @@ from datetime import datetime
 from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from scraper import scrape_product_info, is_valid_trendyol_url
-from data_manager import add_product, remove_product, get_all_products, update_product_price
+from data_manager import add_product, remove_product, get_all_products, update_product_price, get_threshold, set_threshold
 from config import TELEGRAM_BOT_TOKEN, CHECK_INTERVAL, ALLOWED_GROUP_IDS, ADMIN_CHAT_ID, PRICE_CHANGE_THRESHOLD
 
 # Configure logging
@@ -40,7 +40,8 @@ def start(update: Update, context: CallbackContext):
         '/ekle [Trendyol linki] - Fiyat takibi için yeni bir ürün ekler\n'
         '/sil [Trendyol linki] - Takipten bir ürün çıkarır\n'
         '/listele - Takip edilen tüm ürünleri listeler\n'
-        '/yenile - Tüm ürünlerin fiyatlarını manuel olarak kontrol eder\n\n'
+        '/yenile - Tüm ürünlerin fiyatlarını manuel olarak kontrol eder\n'
+        '/threshold [yüzde] - Fiyat değişim eşiğini ayarlar (örn: /threshold 10)\n\n'
         'Ayrıca, direkt olarak Trendyol.com veya ty.gl linki göndererek de ürün ekleyebilirsiniz.'
     )
 
@@ -217,6 +218,10 @@ def list_products(update: Update, context: CallbackContext):
     message = 'Takip Edilen Ürünler:\n\n'
     
     for url, product_info in products.items():
+        # Skip the special _threshold key
+        if url.startswith('_'):
+            continue
+            
         product_name = product_info.get('product_name', 'İsimsiz Ürün')
         current_price = product_info.get('current_price', 0)
         initial_price = product_info.get('initial_price', 0)
@@ -246,6 +251,57 @@ def list_products(update: Update, context: CallbackContext):
     
     update.message.reply_text(message, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
+def threshold_handler(update: Update, context: CallbackContext):
+    """Set or view the price change threshold."""
+    chat_id = update.effective_chat.id
+    
+    # Check if the chat is allowed
+    if not is_allowed_chat(chat_id):
+        logger.info(f"Unauthorized threshold command from chat_id: {chat_id}")
+        return
+    
+    # If no arguments, show current threshold
+    if not context.args:
+        current_threshold = get_threshold(chat_id)
+        update.message.reply_text(
+            f'Mevcut fiyat değişim eşiği: %{current_threshold:.1f}\n\n'
+            f'Eşiği değiştirmek için: /threshold [yüzde]\n'
+            f'Örnek: /threshold 10'
+        )
+        return
+    
+    # Try to parse the threshold value
+    try:
+        new_threshold = float(context.args[0])
+        
+        # Validate threshold value
+        if new_threshold < 0:
+            update.message.reply_text('Eşik değeri negatif olamaz. Lütfen 0 veya daha büyük bir değer girin.')
+            return
+        
+        if new_threshold > 100:
+            update.message.reply_text('Eşik değeri %100\'den büyük olamaz. Lütfen 0-100 arası bir değer girin.')
+            return
+        
+        # Set the new threshold
+        success = set_threshold(chat_id, new_threshold)
+        
+        if success:
+            update.message.reply_text(
+                f'✅ Fiyat değişim eşiği başarıyla güncellendi!\n\n'
+                f'Yeni eşik: %{new_threshold:.1f}\n\n'
+                f'Artık fiyat değişimi %{new_threshold:.1f}\'den fazla olduğunda bildirim alacaksınız.'
+            )
+            logger.info(f"Threshold updated to {new_threshold}% for chat_id: {chat_id}")
+        else:
+            update.message.reply_text('Eşik güncellenirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.')
+            
+    except ValueError:
+        update.message.reply_text(
+            'Geçersiz değer. Lütfen sayısal bir değer girin.\n'
+            'Örnek: /threshold 10'
+        )
+
 # Global variable to store bot instance
 _bot_instance = None
 
@@ -267,6 +323,10 @@ def check_prices():
     
     for chat_id, products in data.items():
         for url, product_info in list(products.items()):
+            # Skip the special _threshold key
+            if url.startswith('_'):
+                continue
+                
             try:
                 product_name = product_info['product_name']
                 current_price = product_info['current_price']
@@ -540,6 +600,7 @@ def main():
     dispatcher.add_handler(CommandHandler("sil", remove_product_handler))
     dispatcher.add_handler(CommandHandler("listele", list_products))
     dispatcher.add_handler(CommandHandler("yenile", refresh_prices_handler))
+    dispatcher.add_handler(CommandHandler("threshold", threshold_handler))
     
     # Message handler for Trendyol links
     dispatcher.add_handler(MessageHandler(
@@ -584,14 +645,21 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
         update.message.reply_text('Henüz takip edilen ürün bulunmamaktadır.')
         return
     
+    # Count actual products (excluding special keys)
+    product_count = sum(1 for key in products.keys() if not key.startswith('_'))
+    
     # Send initial message
-    message = update.message.reply_text(f'🔄 Fiyatlar kontrol ediliyor... ({len(products)} ürün)')
+    message = update.message.reply_text(f'🔄 Fiyatlar kontrol ediliyor... ({product_count} ürün)')
     
     checked_count = 0
     changed_count = 0
     error_count = 0
     
     for url, product_info in products.items():
+        # Skip the special _threshold key
+        if url.startswith('_'):
+            continue
+            
         try:
             product_name = product_info['product_name']
             current_price = product_info['current_price']
@@ -679,8 +747,11 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
                 # Calculate percentage change
                 percentage_change = abs((new_price - current_price) / current_price * 100)
                 
+                # Get the threshold for this chat
+                threshold = get_threshold(chat_id)
+                
                 # Only send notification if the change is more than the threshold
-                if percentage_change > PRICE_CHANGE_THRESHOLD:
+                if percentage_change > threshold:
                     changed_count += 1
                     
                     # Update the price in the database
@@ -719,7 +790,7 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
                 else:
                     # Price changed but not enough to notify - still update the database
                     update_product_price(chat_id, url, new_price)
-                    logger.info(f"Price change for {product_name} ({percentage_change:.2f}%) is below threshold ({PRICE_CHANGE_THRESHOLD}%), no notification sent")
+                    logger.info(f"Price change for {product_name} ({percentage_change:.2f}%) is below threshold ({threshold}%), no notification sent")
         
         except Exception as e:
             logger.error(f"Error checking price for {url}: {e}")
@@ -736,7 +807,7 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
     final_message = (
         f'{status_emoji} <b>Fiyat kontrolü {status_text}</b>\n\n'
         f'📊 <b>Özet:</b>\n'
-        f'• Toplam ürün: {len(products)}\n'
+        f'• Toplam ürün: {product_count}\n'
         f'• Kontrol edilen: {checked_count}\n'
         f'• Fiyat değişen: {changed_count}\n'
         f'• Hata: {error_count}\n\n'

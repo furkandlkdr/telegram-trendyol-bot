@@ -4,7 +4,8 @@ An advanced Telegram bot that tracks product prices on Trendyol and sends smart 
 
 ## ✨ Features
 
-- 🔗 **Universal Link Support**: Works with both Trendyol.com and ty.gl (shortened) links
+### Core Features
+- 🔗 **Universal Link Support**: Works with Trendyol.com, ty.gl (shortened), tyml.gl, and trendyol-milla.com links
 - ➕ **Easy Product Addition**: Use `/ekle` command or simply send a Trendyol link
 - ➖ **Product Management**: Remove products with `/sil` command
 - 📋 **Smart Listing**: View all tracked products with price trends using `/listele`
@@ -13,11 +14,34 @@ An advanced Telegram bot that tracks product prices on Trendyol and sends smart 
   - 📈 "Price Increased" notifications with red indicator
   - 📉 "Price Decreased" notifications with green indicator
   - Detailed price difference and percentage change
+  - 🔔 Customizable notification threshold per chat
 - 🔄 **Manual Refresh**: Use `/yenile` command to instantly check all product prices
+
+### Advanced Features
+- 🛒 **Sold-Out Product Tracking**: 
+  - Automatic detection of out-of-stock products
+  - Special notifications when products go out of stock
+  - Back-in-stock alerts when products become available again
+- ⚙️ **Dynamic Price Threshold**: 
+  - Set custom price change threshold per chat with `/threshold` command
+  - Only get notified when price changes exceed your threshold
+  - Prevents notification spam for minor price fluctuations
 - 🏠 **Multi-Group Support**: Restrict bot access to specific Telegram groups
+- 🚨 **Advanced Error Handling & Monitoring**:
+  - Automatic admin notifications for critical errors
+  - Categorized error messages with suggested solutions
+  - High error rate detection and alerts
+  - Detailed logging for debugging
 - ⚡ **Optimized Performance**: Lightweight code perfect for Raspberry Pi and low-power devices
-- 🛡️ **Enhanced Error Handling**: Robust error management and logging
 - 🎨 **Rich Formatting**: HTML-formatted messages with clickable links
+
+### Anti-Bot & Reliability Features
+- 🔄 **Smart Retry Strategy**: Automatic retry with exponential backoff on failures
+- ⏱️ **Random Request Delays**: Anti-bot protection with randomized delays between requests
+- 🔌 **Connection Pooling**: Efficient HTTP session management with connection reuse
+- 🎯 **Multiple Scraping Methods**: 7 different fallback methods for price detection
+- 📊 **JSON-LD Support**: Extract prices from structured data when available
+- 🧩 **JavaScript Parsing**: Can extract prices from JavaScript variables when needed
 
 ## 📋 Requirements
 
@@ -93,6 +117,7 @@ To find your Telegram group ID:
 | `/sil [URL]` | Remove product from tracking | `/sil https://www.trendyol.com/...` |
 | `/listele` | List all tracked products | `/listele` |
 | `/yenile` | Manual refresh - Check all product prices instantly | `/yenile` |
+| `/threshold [%]` | Set price change notification threshold | `/threshold 10` |
 
 ### Adding Products
 
@@ -125,14 +150,47 @@ Use `/yenile` command to instantly check all tracked product prices:
 - 🔔 **Immediate Notifications**: Sends instant notifications for any price changes found
 - ⚡ **Safe Operation**: Uses the same functions as automatic checking, no system conflicts
 
+### Price Change Threshold Configuration
+
+Control when you get notified with `/threshold` command:
+- 📊 **Custom Threshold**: Set different thresholds for each chat/group
+- 🎯 **Percentage-Based**: Configure threshold as percentage (e.g., 5% = only notify if price changes by more than 5%)
+- 📉 **Reduce Noise**: Avoid notifications for minor price fluctuations
+- 💾 **Persistent**: Threshold is saved and remembered for your chat
+- 📝 **View Current**: Use `/threshold` without parameters to see current setting
+
+**Example Usage:**
+```
+/threshold 10      # Only notify if price changes by more than 10%
+/threshold 0       # Get notified on any price change
+/threshold         # View current threshold
+```
+
+### Sold-Out Product Tracking
+
+The bot automatically detects and tracks product availability:
+- 🚫 **Out-of-Stock Detection**: Automatically detects when products become unavailable
+- 📱 **Sold-Out Notifications**: Get notified immediately when tracked products go out of stock
+- 🟢 **Back-in-Stock Alerts**: Receive notification when sold-out products become available again
+- 💾 **State Preservation**: Product tracking continues even when out of stock
+- 🔄 **Automatic Updates**: Monitors stock status during every price check
+
+**What Happens:**
+1. Product goes out of stock → You get a "Product Sold Out" notification
+2. Bot continues monitoring the product
+3. Product comes back in stock → You get a "Back in Stock" notification with new price
+
 ## 🔄 How It Works
 
-1. **Product Addition**: Bot scrapes product name and current price
-2. **Data Storage**: Information saved in `tracked_products.json`
-3. **Scheduled Checks**: Bot checks prices every X minutes (configurable)
+1. **Product Addition**: Bot scrapes product name and current price using multiple fallback methods
+2. **Data Storage**: Information saved in `tracked_products.json` with initial and current prices
+3. **Scheduled Checks**: Bot checks prices every X minutes (configurable via CHECK_INTERVAL)
 4. **Manual Checks**: Use `/yenile` command for instant price checking
-5. **Smart Notifications**: Only sends alerts when prices actually change
+5. **Smart Notifications**: Only sends alerts when prices change beyond configured threshold
 6. **Price Updates**: Database automatically updates with new prices
+7. **Stock Monitoring**: Continuously monitors product availability and sends stock status alerts
+8. **Error Handling**: Automatic retry with exponential backoff on network failures
+9. **Admin Alerts**: Critical errors and high error rates trigger admin notifications
 
 ## 🐧 Automatic Startup (Linux/Raspberry Pi)
 
@@ -206,11 +264,29 @@ telegram-trendyol-bot/
 - **python-dotenv 1.0.0**: Environment variable management
 
 ### Key Features Implementation
-- **Smart Price Detection**: Multiple selector fallbacks for robust price extraction
-- **URL Validation**: Supports both full and shortened Trendyol links
-- **Error Recovery**: Comprehensive error handling with logging
-- **Memory Efficient**: Minimal resource usage, ideal for 24/7 operation
+- **Advanced Price Detection**: 7 different fallback methods for robust price extraction:
+  1. New Trendyol structure with data-testid attributes
+  2. price-price class search
+  3. Legacy campaign-price and prc-dsc classes
+  4. JSON-LD structured data extraction
+  5. JavaScript variable parsing (winnerVariant, productDetail)
+  6. General TL/₺ symbol search
+  7. Multiple price container strategies
+- **Intelligent Stock Detection**: Multiple methods for accurate stock status:
+  - Add-to-cart button presence and text analysis
+  - Buy-now button detection
+  - Disabled button state checking
+  - Out-of-stock message scanning
+- **URL Validation**: Supports trendyol.com, ty.gl, tyml.gl, and trendyol-milla.com
+- **Retry Strategy**: HTTP requests with exponential backoff (max 3 retries)
+- **Anti-Bot Protection**: 
+  - Random delays (1-3 seconds) between requests
+  - Realistic user-agent headers
+  - Session-based connection pooling
+- **Error Recovery**: Comprehensive error handling with categorization and logging
+- **Memory Efficient**: Minimal resource usage, ideal for 24/7 operation on Raspberry Pi
 - **Thread Safety**: Proper threading for scheduler and bot operations
+- **Admin Monitoring**: Automatic error notifications with diagnostic information
 
 ## 🐛 Troubleshooting
 
@@ -223,8 +299,10 @@ telegram-trendyol-bot/
 
 **Price not detected:**
 - Trendyol may have changed their HTML structure
+- Bot uses 7 different detection methods - if all fail, site structure changed significantly
 - Check logs for scraping errors
 - Try with different products
+- Consider updating the scraper.py with new selectors
 
 **Duplicate notifications:**
 - Fixed with improved scheduler management
@@ -238,9 +316,19 @@ telegram-trendyol-bot/
 
 Bot logs important events. Check console output for:
 - Product addition/removal confirmations
-- Price check results
-- Error details
+- Price check results with detailed scraping attempts
+- Error details with categorization (Network, Timeout, Connection, etc.)
 - Notification sending status
+- Stock status changes (sold-out, back-in-stock)
+- Retry attempts and backoff delays
+- HTTP request/response information
+- Threshold updates and trigger events
+
+**Debug Levels:**
+- `INFO`: Normal operations (price checks, notifications sent)
+- `WARNING`: Recoverable issues (retries, minor errors)
+- `ERROR`: Serious problems (scraping failures, notification errors)
+- `DEBUG`: Detailed technical information (HTML parsing, price extraction)
 
 ## ⚠️ Important Notes
 
@@ -272,7 +360,8 @@ Trendyol'daki ürün fiyatlarını takip eden ve fiyat değişikliklerinde akıl
 
 ## ✨ Özellikler
 
-- 🔗 **Link Desteği**: Hem Trendyol.com hem de ty.gl (kısaltılmış) linklerle çalışır
+### Temel Özellikler
+- 🔗 **Evrensel Link Desteği**: Trendyol.com, ty.gl (kısaltılmış), tyml.gl ve trendyol-milla.com linkleriyle çalışır
 - ➕ **Kolay Ürün Ekleme**: `/ekle` komutu kullanın veya direkt Trendyol linki gönderin-paylaşın
 - ➖ **Ürün Yönetimi**: `/sil` komutu ile ürünleri kaldırın
 - 📋 **Akıllı Listeleme**: `/listele` ile fiyat trendleriyle birlikte tüm takip edilen ürünleri görün
@@ -281,11 +370,34 @@ Trendyol'daki ürün fiyatlarını takip eden ve fiyat değişikliklerinde akıl
   - 📈 Kırmızı gösterge ile "Fiyat Yükseldi" bildirimleri
   - 📉 Yeşil gösterge ile "Fiyat Düştü" bildirimleri
   - Detaylı fiyat farkı ve yüzde değişim bilgisi
+  - 🔔 Her sohbet için özelleştirilebilir bildirim eşiği
 - 🔄 **Manuel Yenileme**: `/yenile` komutu ile tüm ürün fiyatlarını anında kontrol edin
+
+### Gelişmiş Özellikler
+- 🛒 **Tükenen Ürün Takibi**: 
+  - Stokta olmayan ürünlerin otomatik tespiti
+  - Ürünler tükendiğinde özel bildirimler
+  - Ürünler tekrar stokta olduğunda geri geldi uyarıları
+- ⚙️ **Dinamik Fiyat Eşiği**: 
+  - `/threshold` komutu ile her sohbet için özel fiyat değişim eşiği belirleyin
+  - Sadece eşiği aşan fiyat değişikliklerinde bildirim alın
+  - Küçük fiyat dalgalanmalarında bildirim spamını önleyin
 - 🏠 **Çoklu Grup Desteği**: Bot erişimini belirli Telegram gruplarıyla sınırlayın
+- 🚨 **Gelişmiş Hata Yönetimi ve İzleme**:
+  - Kritik hatalar için otomatik admin bildirimleri
+  - Önerilen çözümlerle kategorize edilmiş hata mesajları
+  - Yüksek hata oranı tespiti ve uyarıları
+  - Hata ayıklama için detaylı loglama
 - ⚡ **Optimize Edilmiş Performans**: Raspberry Pi ve düşük güçlü cihazlar için mükemmel hafif kod
-- 🛡️ **Gelişmiş Hata Yönetimi**: Sağlam hata yönetimi ve loglama
 - 🎨 **Zengin Formatlama**: Tıklanabilir linklerle HTML formatlı mesajlar
+
+### Anti-Bot ve Güvenilirlik Özellikleri
+- 🔄 **Akıllı Yeniden Deneme Stratejisi**: Hatalarda üstel geri çekilme ile otomatik yeniden deneme
+- ⏱️ **Rastgele İstek Gecikmeleri**: İstekler arasında rastgele gecikmelerle anti-bot koruması
+- 🔌 **Bağlantı Havuzu**: Bağlantı yeniden kullanımı ile verimli HTTP oturum yönetimi
+- 🎯 **Çoklu Kazıma Yöntemleri**: Fiyat tespiti için 7 farklı yedek yöntem
+- 📊 **JSON-LD Desteği**: Mevcut olduğunda yapılandırılmış verilerden fiyat çıkarımı
+- 🧩 **JavaScript Ayrıştırma**: Gerektiğinde JavaScript değişkenlerinden fiyat çıkarabilir
 
 ## 📋 Gereksinimler
 
@@ -361,6 +473,7 @@ Telegram grup ID'nizi bulmak için:
 | `/sil [URL]` | Ürünü takipten çıkar | `/sil https://www.trendyol.com/...` |
 | `/listele` | Tüm takip edilen ürünleri listele | `/listele` |
 | `/yenile` | Manuel yenileme - Tüm ürün fiyatlarını anında kontrol et | `/yenile` |
+| `/threshold [%]` | Fiyat değişim bildirim eşiğini ayarla | `/threshold 10` |
 
 ### Ürün Ekleme
 
@@ -393,14 +506,47 @@ https://ty.gl/kisaltilmis-link
 - 🔔 **Anında Bildirimler**: Bulunan fiyat değişiklikleri için anında bildirim gönderir
 - ⚡ **Güvenli İşlem**: Otomatik kontrolle aynı fonksiyonları kullanır, sistem çakışması yaşanmaz
 
+### Fiyat Değişim Eşiği Yapılandırması
+
+`/threshold` komutu ile ne zaman bildirim alacağınızı kontrol edin:
+- 📊 **Özel Eşik**: Her sohbet/grup için farklı eşikler belirleyin
+- 🎯 **Yüzde Tabanlı**: Eşiği yüzde olarak yapılandırın (örn: %5 = sadece fiyat %5'ten fazla değişirse bildir)
+- 📉 **Gürültüyü Azalt**: Küçük fiyat dalgalanmaları için bildirim almayın
+- 💾 **Kalıcı**: Eşik kaydedilir ve sohbetiniz için hatırlanır
+- 📝 **Mevcut Değeri Gör**: Parametresiz `/threshold` kullanarak mevcut ayarı görün
+
+**Kullanım Örnekleri:**
+```
+/threshold 10      # Sadece fiyat %10'dan fazla değişirse bildir
+/threshold 0       # Her fiyat değişikliğinde bildir
+/threshold         # Mevcut eşiği görüntüle
+```
+
+### Tükenen Ürün Takibi
+
+Bot otomatik olarak ürün bulunabilirliğini tespit eder ve takip eder:
+- 🚫 **Stokta Yok Tespiti**: Ürünler stokta kalmadığında otomatik tespit
+- 📱 **Tükendi Bildirimleri**: Takip edilen ürünler tükendiğinde anında bildirim
+- 🟢 **Stokta Geri Geldi Uyarıları**: Tükenen ürünler tekrar satışa çıktığında bildirim
+- 💾 **Durum Koruma**: Ürün takibi stokta olmasa bile devam eder
+- 🔄 **Otomatik Güncellemeler**: Her fiyat kontrolünde stok durumunu izler
+
+**Nasıl Çalışır:**
+1. Ürün stoktan tükenir → "Ürün Tükendi" bildirimi alırsınız
+2. Bot ürünü izlemeye devam eder
+3. Ürün tekrar stokta olur → Yeni fiyatıyla "Stokta Geri Geldi" bildirimi alırsınız
+
 ## 🔄 Nasıl Çalışır
 
-1. **Ürün Ekleme**: Bot ürün adını ve güncel fiyatı çeker
-2. **Veri Saklama**: Bilgiler `tracked_products.json` dosyasında saklanır
-3. **Zamanlanmış Kontroller**: Bot her X dakikada bir fiyatları kontrol eder (yapılandırılabilir)
+1. **Ürün Ekleme**: Bot çoklu yedek yöntemler kullanarak ürün adını ve güncel fiyatı çeker
+2. **Veri Saklama**: Bilgiler `tracked_products.json` dosyasında başlangıç ve güncel fiyatlarla saklanır
+3. **Zamanlanmış Kontroller**: Bot her X dakikada bir fiyatları kontrol eder (CHECK_INTERVAL ile yapılandırılabilir)
 4. **Manuel Kontroller**: `/yenile` komutu ile anında fiyat kontrolü yapın
-5. **Akıllı Bildirimler**: Sadece fiyatlar gerçekten değiştiğinde uyarı gönderir
+5. **Akıllı Bildirimler**: Sadece fiyatlar yapılandırılan eşiğin üzerinde değiştiğinde uyarı gönderir
 6. **Fiyat Güncellemeleri**: Veritabanı otomatik olarak yeni fiyatlarla güncellenir
+7. **Stok İzleme**: Ürün bulunabilirliğini sürekli izler ve stok durumu uyarıları gönderir
+8. **Hata Yönetimi**: Ağ hatalarında üstel geri çekilme ile otomatik yeniden deneme
+9. **Admin Uyarıları**: Kritik hatalar ve yüksek hata oranları admin bildirimlerini tetikler
 
 ## 🐧 Otomatik Başlatma (Linux/Raspberry Pi)
 
@@ -474,11 +620,125 @@ telegram-trendyol-bot/
 - **python-dotenv 1.0.0**: Çevre değişkeni yönetimi
 
 ### Ana Özellikler Uygulaması
-- **Akıllı Fiyat Tespiti**: Sağlam fiyat çıkarma için çoklu seçici yedekleri
-- **URL Doğrulama**: Hem tam hem de kısaltılmış Trendyol linklerini destekler
-- **Hata Kurtarma**: Loglama ile kapsamlı hata yönetimi
-- **Bellek Verimli**: Minimal kaynak kullanımı, 7/24 işletim için ideal
+- **Gelişmiş Fiyat Tespiti**: Sağlam fiyat çıkarma için 7 farklı yedek yöntem:
+  1. Yeni Trendyol yapısı (data-testid özellikleri)
+  2. price-price sınıf araması
+  3. Eski campaign-price ve prc-dsc sınıfları
+  4. JSON-LD yapılandırılmış veri çıkarımı
+  5. JavaScript değişken ayrıştırma (winnerVariant, productDetail)
+  6. Genel TL/₺ sembol araması
+  7. Çoklu fiyat konteyner stratejileri
+- **Akıllı Stok Tespiti**: Doğru stok durumu için çoklu yöntemler:
+  - Sepete ekle butonu varlığı ve metin analizi
+  - Hemen al butonu tespiti
+  - Devre dışı buton durum kontrolü
+  - Stokta yok mesaj taraması
+- **URL Doğrulama**: trendyol.com, ty.gl, tyml.gl ve trendyol-milla.com destekler
+- **Yeniden Deneme Stratejisi**: Üstel geri çekilme ile HTTP istekleri (maks 3 deneme)
+- **Anti-Bot Koruması**: 
+  - İstekler arası rastgele gecikmeler (1-3 saniye)
+  - Gerçekçi kullanıcı-agent başlıkları
+  - Oturum tabanlı bağlantı havuzu
+- **Hata Kurtarma**: Kategorilendirme ve loglama ile kapsamlı hata yönetimi
+- **Bellek Verimli**: Minimal kaynak kullanımı, Raspberry Pi'de 7/24 işletim için ideal
 - **Thread Güvenliği**: Zamanlayıcı ve bot işlemleri için uygun threading
+- **Admin İzleme**: Tanı bilgileri ile otomatik hata bildirimleri
+
+## 🔬 Advanced Scraping Techniques
+
+### Multi-Method Price Detection
+
+The bot uses a sophisticated waterfall approach to extract prices, trying 7 different methods in order:
+
+1. **Modern Trendyol Structure** (Primary)
+   - Searches for `data-testid="price"` containers
+   - Looks for discounted prices first, then original prices
+   - Handles multiple price display formats
+
+2. **Class-Based Search** (Secondary)
+   - `price-price` class divs
+   - `campaign-price` paragraphs
+   - `prc-dsc` span elements
+
+3. **Structured Data** (Tertiary)
+   - Parses JSON-LD schema.org markup
+   - Extracts from `offers.price` fields
+   - Handles both single and array offers
+
+4. **JavaScript Variables** (Quaternary)
+   - Searches for `winnerVariant` object
+   - Looks for `productDetail` data
+   - Extracts from various price field names
+
+5. **Symbol Search** (Last Resort)
+   - General TL/₺ symbol search
+   - Price range validation (0.01-100,000 TL)
+   - Filters out IDs and non-price numbers
+
+### Stock Status Detection
+
+Multiple methods ensure accurate stock detection:
+
+- **Button Analysis**: Checks add-to-cart and buy-now button presence and text
+- **Disabled State**: Detects disabled purchase buttons
+- **Text Scanning**: Searches for out-of-stock messages in visible elements
+- **Context Filtering**: Ignores JavaScript code and metadata to avoid false positives
+
+### Anti-Bot Features
+
+- **Random Delays**: 1-3 second randomized delays between requests
+- **Retry with Backoff**: Exponential backoff (2^attempt + random)
+- **Session Pooling**: Reuses HTTP connections for efficiency
+- **Realistic Headers**: Browser-like user agent and accept headers
+- **Error Recovery**: Graceful degradation on failures
+
+## 🔬 Gelişmiş Kazıma Teknikleri
+
+### Çok Yöntemli Fiyat Tespiti
+
+Bot fiyatları çıkarmak için sofistike bir şelale yaklaşımı kullanır, 7 farklı yöntemi sırayla dener:
+
+1. **Modern Trendyol Yapısı** (Birincil)
+   - `data-testid="price"` konteynerlerini arar
+   - Önce indirimli fiyatlara, sonra orijinal fiyatlara bakar
+   - Çoklu fiyat gösterim formatlarını işler
+
+2. **Sınıf Tabanlı Arama** (İkincil)
+   - `price-price` sınıf divleri
+   - `campaign-price` paragrafları
+   - `prc-dsc` span elementleri
+
+3. **Yapılandırılmış Veri** (Üçüncül)
+   - JSON-LD schema.org işaretlemesini ayrıştırır
+   - `offers.price` alanlarından çıkarır
+   - Hem tekli hem dizi tekliflerini işler
+
+4. **JavaScript Değişkenleri** (Dörtüncül)
+   - `winnerVariant` objesini arar
+   - `productDetail` verisine bakar
+   - Çeşitli fiyat alan adlarından çıkarır
+
+5. **Sembol Araması** (Son Çare)
+   - Genel TL/₺ sembol araması
+   - Fiyat aralığı doğrulaması (0.01-100.000 TL)
+   - ID'leri ve fiyat olmayan sayıları filtreler
+
+### Stok Durumu Tespiti
+
+Doğru stok tespiti için çoklu yöntemler:
+
+- **Buton Analizi**: Sepete ekle ve hemen al butonlarının varlığını ve metnini kontrol eder
+- **Devre Dışı Durum**: Devre dışı satın alma butonlarını tespit eder
+- **Metin Tarama**: Görünür elementlerde stokta yok mesajlarını arar
+- **Bağlam Filtreleme**: Yanlış pozitifleri önlemek için JavaScript kodu ve metadatayı yok sayar
+
+### Anti-Bot Özellikleri
+
+- **Rastgele Gecikmeler**: İstekler arası 1-3 saniye rastgele gecikmeler
+- **Geri Çekilme ile Yeniden Deneme**: Üstel geri çekilme (2^deneme + rastgele)
+- **Oturum Havuzu**: Verimlilik için HTTP bağlantılarını yeniden kullanır
+- **Gerçekçi Başlıklar**: Tarayıcı benzeri kullanıcı aracı ve kabul başlıkları
+- **Hata Kurtarma**: Hatalarda zarif düşüş
 
 ## 🐛 Sorun Giderme
 
@@ -491,8 +751,10 @@ telegram-trendyol-bot/
 
 **Fiyat tespit edilmiyor:**
 - Trendyol HTML yapısını değiştirmiş olabilir
+- Bot 7 farklı tespit yöntemi kullanır - hepsi başarısız olursa site yapısı önemli ölçüde değişmiş
 - Kazıma hatalarını kontrol etmek için logları inceleyin
 - Farklı ürünlerle deneyin
+- Yeni seçicilerle scraper.py'yi güncellemeyi düşünün
 
 **Çift bildirim:**
 - Geliştirilmiş zamanlayıcı yönetimiyle düzeltildi
@@ -506,9 +768,19 @@ telegram-trendyol-bot/
 
 Bot önemli olayları loglar. Konsol çıktısında şunları kontrol edin:
 - Ürün ekleme/çıkarma onayları
-- Fiyat kontrol sonuçları
-- Hata detayları
+- Detaylı kazıma denemeleriyle fiyat kontrol sonuçları
+- Kategorilendirme ile hata detayları (Ağ, Zaman Aşımı, Bağlantı, vb.)
 - Bildirim gönderme durumu
+- Stok durumu değişiklikleri (tükendi, stokta geri geldi)
+- Yeniden deneme girişimleri ve geri çekilme gecikmeleri
+- HTTP istek/yanıt bilgileri
+- Eşik güncellemeleri ve tetikleme olayları
+
+**Hata Seviyeleri:**
+- `INFO`: Normal işlemler (fiyat kontrolleri, bildirim gönderildi)
+- `WARNING`: Kurtarılabilir sorunlar (yeniden denemeler, küçük hatalar)
+- `ERROR`: Ciddi problemler (kazıma hataları, bildirim hataları)
+- `DEBUG`: Detaylı teknik bilgiler (HTML ayrıştırma, fiyat çıkarımı)
 
 ## ⚠️ Önemli Notlar
 

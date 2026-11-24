@@ -95,6 +95,31 @@ def update_product_price(chat_id, product_url, new_price):
     
     return save_data(data)
 
+def increment_fail_count(chat_id, product_url):
+    """Increment consecutive failure count for a product. Returns new count."""
+    data = load_data()
+    
+    if str(chat_id) not in data or product_url not in data[str(chat_id)]:
+        return 0
+    
+    entry = data[str(chat_id)][product_url]
+    entry["fail_count"] = entry.get("fail_count", 0) + 1
+    save_data(data)
+    return entry["fail_count"]
+
+def reset_fail_count(chat_id, product_url):
+    """Reset consecutive failure count after a successful check."""
+    data = load_data()
+    
+    if str(chat_id) not in data or product_url not in data[str(chat_id)]:
+        return False
+    
+    entry = data[str(chat_id)][product_url]
+    if entry.get("fail_count"):
+        entry["fail_count"] = 0
+        return save_data(data)
+    return True
+
 def get_threshold(chat_id):
     """Get the price change threshold for a specific chat. Returns default if not set."""
     from config import PRICE_CHANGE_THRESHOLD

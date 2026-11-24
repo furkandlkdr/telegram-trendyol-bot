@@ -40,3 +40,9 @@ USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 # Price change notification threshold (in percentage)
 PRICE_CHANGE_THRESHOLD = 5.0  # Only notify if price changes by more than 5%
 
+# Consecutive "product not found" (404/410) failures before auto-removing a product
+PRODUCT_NOT_FOUND_THRESHOLD = int(os.getenv('PRODUCT_NOT_FOUND_THRESHOLD', '3'))
+
+# Minimum interval (seconds) between admin error notifications
+ADMIN_NOTIFY_MIN_INTERVAL = int(os.getenv('ADMIN_NOTIFY_MIN_INTERVAL', '600'))
+

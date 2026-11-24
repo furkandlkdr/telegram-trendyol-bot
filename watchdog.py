@@ -9,7 +9,6 @@ import time
 import requests
 import subprocess
 import logging
-import os
 from datetime import datetime
 from config import TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID
 
@@ -114,38 +113,10 @@ class TrendyolBotWatchdog:
             logger.error(f"Systemd komutu başarısız: {e}")
         except Exception as e:
             logger.error(f"Systemd restart hatası: {e}")
-            
-        # Systemd başarısız olursa manuel başlatma dene
-        try:
-            logger.info("Manuel başlatma deneniyor...")
-            
-            # Mevcut dizini al
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            main_script = os.path.join(script_dir, 'main.py')
-            venv_python = os.path.join(script_dir, 'venv', 'bin', 'python')
-            
-            # Virtual environment python'unu kullan
-            if os.path.exists(venv_python):
-                python_cmd = venv_python
-            else:
-                python_cmd = 'python3'
-                
-            # Background'da başlat
-            process = subprocess.Popen(
-                [python_cmd, main_script],
-                cwd=script_dir,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
-            
-            logger.info(f"Bot manuel olarak başlatıldı (PID: {process.pid})")
-            time.sleep(RESTART_DELAY)
-            return True
-            
-        except Exception as e:
-            logger.error(f"Manuel restart hatası: {e}")
-            
+        
+        # Manuel fallback kaldırıldı: systemd Restart=always zaten devrede.
+        # Ayrı bir Popen ile ikinci instance başlatmak getUpdates Conflict'e yol açıyordu.
+        logger.error("Systemd restart başarısız. systemd'in Restart=always politikasına bırakılıyor; manuel ikinci instance başlatılmayacak.")
         return False
 
     def reset_restart_counter(self):

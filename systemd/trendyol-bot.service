@@ -5,11 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/telegram-trendyol-bot
-Environment=PATH=/home/pi/telegram-trendyol-bot/venv/bin
-ExecStart=/home/pi/telegram-trendyol-bot/venv/bin/python main.py
+User=furkan
+WorkingDirectory=/home/furkan/telegram-trendyol-bot
+Environment=PATH=/home/furkan/telegram-trendyol-bot/venv/bin
+ExecStart=/home/furkan/telegram-trendyol-bot/venv/bin/python main.py
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
@@ -25,7 +24,7 @@ SyslogIdentifier=trendyol-bot
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/pi/telegram-trendyol-bot
+ReadWritePaths=/home/furkan/telegram-trendyol-bot
 
 [Install]
 WantedBy=multi-user.target

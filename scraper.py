@@ -131,6 +131,10 @@ def scrape_product_info(url):
             
             if response.status_code != 200:
                 last_error = f"HTTP {response.status_code}"
+                # Permanent errors: retrying is pointless, fail fast
+                if response.status_code in (404, 410):
+                    logger.warning(f"Product page not found (HTTP {response.status_code}), no retry: {url}")
+                    return None, None, f"Product not found (HTTP {response.status_code})"
                 logger.warning(f"HTTP {response.status_code} for {url}, attempt {attempt + 1}")
                 if attempt == MAX_RETRIES - 1:
                     return None, None, f"Failed to access product page. Status code: {response.status_code}"

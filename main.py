@@ -8,8 +8,14 @@ from datetime import datetime
 from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from scraper import scrape_product_info, is_valid_trendyol_url
-from data_manager import add_product, remove_product, get_all_products, update_product_price, get_threshold, set_threshold
-from config import TELEGRAM_BOT_TOKEN, CHECK_INTERVAL, ALLOWED_GROUP_IDS, ADMIN_CHAT_ID, PRICE_CHANGE_THRESHOLD
+from data_manager import (
+    add_product, remove_product, get_all_products, update_product_price,
+    get_threshold, set_threshold, increment_fail_count, reset_fail_count
+)
+from config import (
+    TELEGRAM_BOT_TOKEN, CHECK_INTERVAL, ALLOWED_GROUP_IDS, ADMIN_CHAT_ID,
+    PRICE_CHANGE_THRESHOLD, PRODUCT_NOT_FOUND_THRESHOLD, ADMIN_NOTIFY_MIN_INTERVAL
+)
 
 # Configure logging
 logging.basicConfig(
@@ -20,6 +26,76 @@ logger = logging.getLogger(__name__)
 
 # Global variable to store bot instance
 _bot_instance = None
+
+# Rate limit state for admin error notifications
+_last_admin_error_notify = 0.0
+
+def describe_error(error):
+    """Map raw scraper/HTTP errors to a short Turkish explanation."""
+    if not error:
+        return "Bilinmeyen hata"
+    error = str(error)
+    if "Product not found" in error or "404" in error or "410" in error:
+        return "Ürün sayfası bulunamadı (kaldırılmış olabilir)"
+    if error == "Tükendi":
+        return "Ürün stoklarda tükenmiş"
+    if "Could not extract product name" in error:
+        return "Ürün adı sayfadan okunamadı (sayfa yapısı değişmiş olabilir)"
+    if "Could not extract price" in error:
+        return "Fiyat bilgisi sayfadan okunamadı"
+    if "Timeout" in error or "timeout" in error:
+        return "Zaman aşımı — Trendyol'a erişim yavaş"
+    if "Connection" in error or "connection" in error or "Network" in error:
+        return "Ağ bağlantısı hatası"
+    if "URL does not belong" in error:
+        return "Geçersiz Trendyol linki"
+    if "Failed after" in error or "Status code" in error:
+        return f"Sayfaya erişilemedi ({error})"
+    return error
+
+def handle_not_found_product(chat_id, url, product_name, bot=None):
+    """Track consecutive not-found failures; notify channel once and remove product at threshold.
+    Returns True if the product was removed."""
+    fail_count = increment_fail_count(chat_id, url)
+    logger.warning(
+        f"[Ürün Bulunamadı] {product_name} — Ürün sayfası bulunamadı "
+        f"(üst üste {fail_count}/{PRODUCT_NOT_FOUND_THRESHOLD} kez) ({url})"
+    )
+
+    if fail_count < PRODUCT_NOT_FOUND_THRESHOLD:
+        return False
+
+    target_bot = bot or _bot_instance
+    notification_text = (
+        f'🗑️ <b>Ürün Takipten Kaldırıldı!</b>\n\n'
+        f'<b>{product_name}</b>\n'
+        f'Sebep: Ürün sayfası bulunamadı (404/410).\n'
+        f'Ürün Trendyol\'dan kaldırılmış olabilir.\n\n'
+        f'Tekrar takip etmek isterseniz /ekle ile yeniden ekleyebilirsiniz.\n\n'
+        f'<a href="{url}">Ürüne Git</a>'
+    )
+
+    sent = False
+    if target_bot:
+        try:
+            target_bot.send_message(
+                chat_id=int(chat_id),
+                text=notification_text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
+            sent = True
+            logger.info(f"Product removal notification sent to {chat_id} for {url}")
+        except Exception as send_error:
+            logger.error(f"Failed to send product removal notification to {chat_id}: {send_error}")
+
+    # Remove only after successful notification so the user is informed exactly once
+    if sent:
+        if remove_product(chat_id, url):
+            logger.info(f"Product auto-removed after {fail_count} not-found failures: {url}")
+            return True
+        logger.error(f"Product removal notification sent but failed to remove {url} from data")
+    return False
 
 def is_allowed_chat(chat_id):
     """Check if the chat_id is in the allowed list."""
@@ -320,6 +396,7 @@ def check_prices():
         return
     
     error_count = 0
+    failed_products = []  # (product_name, reason)
     
     for chat_id, products in data.items():
         for url, product_info in list(products.items()):
@@ -338,6 +415,7 @@ def check_prices():
                 
                 # Handle sold-out products specially
                 if error == "Tükendi":
+                    reset_fail_count(chat_id, url)
                     # Product is sold out
                     if current_price != 0:  # Only update if not already marked as sold out
                         update_product_price(chat_id, url, 0)
@@ -368,9 +446,17 @@ def check_prices():
                     continue
                 
                 if error:
-                    logger.error(f"Error checking {url}: {error}")
                     error_count += 1
+                    reason = describe_error(error)
+                    if "Product not found" in error:
+                        logger.warning(f"[Ürün Bulunamadı] {product_name} — {reason} ({url})")
+                        handle_not_found_product(chat_id, url, product_name)
+                    else:
+                        logger.error(f"[Fiyat Kontrol Hatası] {product_name} — {reason} ({url}) | Ham hata: {error}")
+                    failed_products.append((product_name, reason))
                     continue
+                
+                reset_fail_count(chat_id, url)
                 
                 # Handle case where product was sold out but now has a price (back in stock)
                 if current_price == 0 and new_price and new_price > 0:
@@ -398,8 +484,10 @@ def check_prices():
                     continue
                 
                 if new_price is None:
-                    logger.error(f"Could not get price for {url}")
+                    reason = "Fiyat bilgisi alınamadı"
+                    logger.error(f"[Fiyat Kontrol Hatası] {product_name} — {reason} ({url})")
                     error_count += 1
+                    failed_products.append((product_name, reason))
                     continue
                 
                 # If the price has changed
@@ -458,13 +546,22 @@ def check_prices():
                     logger.info(f"No price change for {product_name}")
             
             except Exception as e:
-                logger.error(f"Error checking price for {url}: {e}")
+                reason = describe_error(e)
+                name = product_info.get('product_name', url) if isinstance(product_info, dict) else url
+                logger.error(f"[Beklenmeyen Hata] {name} — {reason} ({url}) | {type(e).__name__}: {e}")
                 error_count += 1
+                failed_products.append((name, reason))
     
     # Send admin notification if there are too many errors
     if error_count > 5 and ADMIN_CHAT_ID:
         total_products = sum(len(products) for products in data.values())
         error_rate = (error_count / total_products) * 100 if total_products > 0 else 0
+        
+        failed_list = "\n".join(
+            f"• <b>{name}</b> — {reason}" for name, reason in failed_products[:10]
+        ) or "• (liste yok)"
+        if len(failed_products) > 10:
+            failed_list += f"\n… ve {len(failed_products) - 10} ürün daha"
         
         admin_message = f"""
 ⚠️ <b>Fiyat Kontrol Uyarısı</b>
@@ -474,12 +571,8 @@ def check_prices():
 <b>Hata Sayısı:</b> {error_count}
 <b>Hata Oranı:</b> %{error_rate:.1f}
 
-<b>Durum:</b> Çok sayıda hata tespit edildi
-<b>Olası Sebepler:</b>
-• Ağ bağlantı sorunları
-• Trendyol anti-bot korumaları
-• Site yapısı değişiklikleri
-• Sunucu yük problemi
+<b>Hatalı Ürünler:</b>
+{failed_list}
 
 <b>Öneriler:</b>
 • İnternet bağlantısını kontrol edin
@@ -514,49 +607,69 @@ def send_admin_notification(message):
         return False
 
 def error(update: Update, context: CallbackContext):
-    """Log errors caused by updates and notify admin."""
+    """Log errors caused by updates and notify admin (rate-limited)."""
+    global _last_admin_error_notify
+    
     error_message = str(context.error)
     error_type = type(context.error).__name__
     
-    # Log the error with more detail
-    logger.error(f"Update {update} caused error {error_type}: {error_message}")
-    logger.error(f"Full traceback: {traceback.format_exc()}")
+    # Conflict means another getUpdates is active (stale connection after network blip
+    # or a duplicate instance). Transient by nature - log as warning, no admin spam.
+    if "Conflict" in error_message:
+        logger.warning(f"[Telegram Bağlantı] getUpdates çakışması (geçici, muhtemelen bayat bağlantı): {error_message}")
+        return
     
-    # Prepare detailed error message for admin
-    if ADMIN_CHAT_ID:
+    is_network_error = (
+        "urllib3" in error_message or "HTTPError" in error_message
+        or "NetworkError" in error_type or "timeout" in error_message.lower()
+        or "connection" in error_message.lower() or "RemoteDisconnected" in error_message
+    )
+    
+    if is_network_error:
+        # Transient Telegram API blip - one short line, no traceback flood
+        logger.warning(
+            f"[Telegram Bağlantı] API ile bağlantı sorunu (geçici olabilir, bot çalışmaya devam ediyor): "
+            f"{error_type}: {error_message[:200]}"
+        )
+    else:
+        logger.error(f"[Bot Hatası] {error_type}: {error_message}")
+        logger.error(
+            f"Traceback: {''.join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__))[:2000]}"
+        )
+    
+    # Rate-limited admin notification (skip if none configured)
+    now = time.time()
+    if ADMIN_CHAT_ID and (now - _last_admin_error_notify) >= ADMIN_NOTIFY_MIN_INTERVAL:
+        _last_admin_error_notify = now
         try:
-            # Check for specific error types
-            error_category = "Genel Hata"
-            if "urllib3" in error_message or "HTTPError" in error_message:
-                error_category = "Ağ Bağlantı Hatası"
+            if is_network_error:
+                error_category = "Telegram API Bağlantı Hatası"
+                short_error = "Telegram API'ye erişilemedi (ağ/DNS/bağlantı kopması)"
             elif "timeout" in error_message.lower():
                 error_category = "Zaman Aşımı Hatası"
-            elif "connection" in error_message.lower():
-                error_category = "Bağlantı Hatası"
-            elif "remote" in error_message.lower() and "disconnect" in error_message.lower():
-                error_category = "Sunucu Bağlantı Hatası"
+                short_error = error_message[:150]
+            else:
+                error_category = "Genel Hata"
+                short_error = f"{error_type}: {error_message[:150]}"
             
             admin_message = f"""
 🚨 <b>Trendyol Bot Hatası</b>
 
 <b>Kategori:</b> {error_category}
-<b>Hata Türü:</b> <code>{error_type}</code>
-<b>Hata:</b> <code>{error_message}</code>
-
+<b>Hata:</b> <code>{short_error}</code>
 <b>Zaman:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
-
-<b>Update:</b> <code>{str(update)[:500] if update else 'None'}</code>
-
-<b>Traceback:</b>
-<pre>{traceback.format_exc()[:1000]}</pre>
 
 <b>Önerilen Çözüm:</b>
 {get_error_solution(error_category)}
+
+<i>Bu bildirim 10 dakikada bir rate-limit'e alınmıştır.</i>
             """
             
             send_admin_notification(admin_message)
         except Exception as e:
             logger.error(f"Error in error handler: {e}")
+    elif ADMIN_CHAT_ID:
+        logger.info("Admin error notification suppressed (rate limit)")
     
     # Notify user about the error if possible
     if update and update.effective_message:
@@ -568,6 +681,7 @@ def error(update: Update, context: CallbackContext):
 def get_error_solution(error_category):
     """Get suggested solution based on error category."""
     solutions = {
+        "Telegram API Bağlantı Hatası": "• İnternet bağlantısını kontrol edin\n• Bot kendini toparlar, tekrarlayan olursa router'ı yeniden başlatın",
         "Ağ Bağlantı Hatası": "• İnternet bağlantısını kontrol edin\n• Birkaç dakika bekleyip tekrar deneyin\n• Trendyol sitesinin erişilebilir olduğunu kontrol edin",
         "Zaman Aşımı Hatası": "• Timeout değerini artırın\n• İnternet hızını kontrol edin\n• Sunucu yükü yüksek olabilir",
         "Bağlantı Hatası": "• DNS ayarlarını kontrol edin\n• VPN kullanıyorsanız kapatıp deneyin\n• Firewall ayarlarını kontrol edin",
@@ -672,6 +786,7 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
             
             # Handle sold-out products specially
             if error == "Tükendi":
+                reset_fail_count(chat_id, url)
                 # Product is sold out
                 checked_count += 1
                 if current_price != 0:  # Only update if not already marked as sold out
@@ -702,9 +817,16 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
                 continue
             
             if error:
-                logger.error(f"Error checking {url}: {error}")
                 error_count += 1
+                reason = describe_error(error)
+                if "Product not found" in error:
+                    logger.warning(f"[Ürün Bulunamadı] {product_name} — {reason} ({url})")
+                    handle_not_found_product(chat_id, url, product_name, bot=context.bot)
+                else:
+                    logger.error(f"[Fiyat Kontrol Hatası] {product_name} — {reason} ({url}) | Ham hata: {error}")
                 continue
+            
+            reset_fail_count(chat_id, url)
             
             # Handle case where product was sold out but now has a price (back in stock)
             if current_price == 0 and new_price and new_price > 0:
@@ -734,7 +856,7 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
                 continue
             
             if new_price is None:
-                logger.error(f"Could not get price for {url}")
+                logger.error(f"[Fiyat Kontrol Hatası] {product_name} — Fiyat bilgisi alınamadı ({url})")
                 error_count += 1
                 continue
             
@@ -796,7 +918,9 @@ def refresh_prices_handler(update: Update, context: CallbackContext):
                     logger.info(f"Price change for {product_name} ({percentage_change:.2f}%) is below threshold ({threshold}%), no notification sent")
         
         except Exception as e:
-            logger.error(f"Error checking price for {url}: {e}")
+            reason = describe_error(e)
+            name = product_info.get('product_name', url) if isinstance(product_info, dict) else url
+            logger.error(f"[Beklenmeyen Hata] {name} — {reason} ({url}) | {type(e).__name__}: {e}")
             error_count += 1
     
     # Update the status message with results
